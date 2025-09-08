@@ -142,7 +142,7 @@ async function logLessonContext(page) {
 }
 
 async function clickPlay(page) {
-  // 1) Overlay nativo da página (se existir)
+  // 1) Overlay nativo da página
   const overlayPlay = page.locator('button[data-play-button="true"]').first();
   if (await overlayPlay.count()) {
     notice('Play overlay encontrado, clicando...');
@@ -152,28 +152,23 @@ async function clickPlay(page) {
     } catch {}
   }
 
-  // 2) Iframe do Vimeo — clique no centro
+  // 2) Iframe do Vimeo — clique direto no elemento
   const vimeoFrame = page.locator('iframe[src*="player.vimeo.com"]').first();
   if (await vimeoFrame.count()) {
     notice('Iframe do Vimeo encontrado; clicando no centro para iniciar.');
     try {
-      const box = await vimeoFrame.boundingBox();
-      if (box) {
-        const centerX = box.x + box.width / 2;
-        const centerY = box.y + box.height / 2;
-        await page.mouse.click(centerX, centerY, { delay: 50 });
-        await page.waitForTimeout(500);
-        // Segundo clique como reforço
-        await page.mouse.click(centerX, centerY, { delay: 50 });
-        return true;
-      }
+      await vimeoFrame.scrollIntoViewIfNeeded();
+      await vimeoFrame.click({ position: { x: 50, y: 50 } }); // porcentagem relativa
+      await page.waitForTimeout(500);
+      // Segundo clique como reforço
+      await vimeoFrame.click({ position: { x: 50, y: 50 } });
+      return true;
     } catch {}
-    // 2b) Focar e mandar Espaço
+    // Fallback: tecla Espaço
     try {
       notice('Tentando iniciar com tecla Espaço focando o iframe.');
       const frameHandle = await vimeoFrame.elementHandle();
       if (frameHandle) {
-        await frameHandle.scrollIntoViewIfNeeded();
         await frameHandle.focus();
         await page.keyboard.press('Space');
         await page.waitForTimeout(500);
@@ -187,20 +182,15 @@ async function clickPlay(page) {
   if (await anyFrame.count()) {
     notice('Tentando iniciar via clique no centro do primeiro iframe (fallback).');
     try {
-      const box = await anyFrame.boundingBox();
-      if (box) {
-        const centerX = box.x + box.width / 2;
-        const centerY = box.y + box.height / 2;
-        await page.mouse.click(centerX, centerY, { delay: 50 });
-        return true;
-      }
+      await anyFrame.scrollIntoViewIfNeeded();
+      await anyFrame.click({ position: { x: 50, y: 50 } });
+      return true;
     } catch {}
   }
 
   warn('Não foi possível acionar o play.');
   return false;
 }
-
 
 async function playAndWaitForVideo(page) {
   // Log de contexto
