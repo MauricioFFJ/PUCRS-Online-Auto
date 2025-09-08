@@ -23,16 +23,16 @@ async function waitAndClick(page, selector, opts = {}) {
 }
 
 async function tryClickAvancar(page) {
-  // 1) Buscar por role
+  // 1) Role
   const byRole = page.getByRole('button', { name: /Avan\w*çar/i });
   if (await byRole.count()) { await byRole.first().click(); return true; }
 
-  // 2) Botão com span label
+  // 2) Botão com label
   const bySpan = page.locator('button:has(span.MuiButton-label:has-text("Avançar"))');
   if (await bySpan.count()) { await bySpan.first().click(); return true; }
 
-  // 3) Qualquer elemento com texto "Avançar"
-  const byText = page.locator('text="Avançar"');
+  // 3) Texto solto
+  const byText = page.locator('text=Avançar');
   if (await byText.count()) { await byText.first().click(); return true; }
 
   return false;
@@ -90,22 +90,20 @@ async function openDisciplines(page) {
   return links.slice(0, 2);
 }
 
-// Parse de durações:
-// - "18m", "1h", "1h 05m", "45s"
-// - "mm:ss", "hh:mm:ss"
+// Aceita "18m", "1h", "1h 05m", "45s", "mm:ss", "hh:mm:ss"
 function parseTimeToMs(timeStr) {
   const s = (timeStr || '').trim().toLowerCase();
 
-  // Formatos "hh:mm:ss" ou "mm:ss"
+  // hh:mm:ss ou mm:ss
   if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(s)) {
     const parts = s.split(':').map(n => parseInt(n, 10));
     let seconds = 0;
     if (parts.length === 2) seconds = parts[0] * 60 + parts[1];
-    else if (parts.length === 3) seconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+    else seconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
     return (seconds + 60) * 1000; // +1 min
   }
 
-  // Formatos "1h 05m", "18m", "45s", "1h"
+  // 1h 05m / 18m / 45s / 1h
   let hours = 0, minutes = 0, seconds = 0;
   const hMatch = s.match(/(\d+)\s*h/);
   const mMatch = s.match(/(\d+)\s*m/);
@@ -123,47 +121,85 @@ function parseTimeToMs(timeStr) {
   return 5 * 60 * 1000;
 }
 
-// Tenta clicar no play:
-// 1) Botão overlay na própria página (data-play-button)
-// 2) Clique no centro do iframe do Vimeo (cross-origin) para iniciar playback
+async function logLessonContext(page) {
+  // Tempo
+  try {
+    const tempo = await page.locator('p[data-cy="timePartLesson"]').first().innerText({ timeout: 4000 });
+    notice(`Tempo informado na página: ${tempo}`);
+  } catch { /* silencioso */ }
+
+  // infoCard
+  try {
+    const info = await page.locator('div.infoCard').first().innerText({ timeout: 2000 });
+    if (info && info.trim()) notice(`infoCard: ${info.trim().slice(0, 300)}`);
+  } catch { /* silencioso */ }
+
+  // partLesson
+  try {
+    const part = await page.locator('div[data-cy="partLesson"]').first().innerText({ timeout: 2000 });
+    if (part && part.trim()) notice(`partLesson: ${part.trim().slice(0, 300)}`);
+  } catch { /* silencioso */ }
+}
+
+// Clicar no PLAY dentro do iframe (Vimeo) no canto inferior esquerdo
 async function clickPlay(page) {
-  // 1) Botão overlay da página (quando disponível)
+  // 1) Tenta overlay nativo da página (data-play-button)
   const overlayPlay = page.locator('button[data-play-button="true"]').first();
   if (await overlayPlay.count()) {
     notice('Play overlay encontrado, clicando...');
     try {
       await overlayPlay.click({ timeout: 5000 });
       return true;
-    } catch { /* segue para iframe */ }
+    } catch { /* continua */ }
   }
 
-  // 2) Iframe do Vimeo: clicar no centro para iniciar
+  // 2) Iframe do Vimeo
   const vimeoFrame = page.locator('iframe[src*="player.vimeo.com"]').first();
   if (await vimeoFrame.count()) {
-    notice('Iframe do Vimeo encontrado; clicando no centro para iniciar.');
+    notice('Iframe do Vimeo encontrado; clicando no canto inferior esquerdo.');
     try {
       const box = await vimeoFrame.boundingBox();
       if (box) {
-        const x = box.x + box.width / 2;
-        const y = box.y + box.height / 2;
+        // Offset um pouco afastado das bordas para evitar áreas "mortas"
+        const x = box.x + Math.max(24, box.width * 0.05);
+        const y = box.y + box.height - Math.max(24, box.height * 0.08);
         await page.mouse.move(x, y);
-        await page.mouse.click(x, y);
+        await page.mouse.click(x, y, { delay: 50 });
+        // Alguns players exigem um segundo clique se há overlay
+        await page.waitForTimeout(800);
+        await page.mouse.click(x, y, { delay: 50 });
         return true;
       }
-    } catch { /* ignora */ }
+    } catch { /* continua */ }
+
+    // 2b) Focar o iframe e enviar "Espaço" como fallback
+    try {
+      notice('Tentando iniciar com tecla Espaço focando o iframe.');
+      const frameHandle = await vimeoFrame.elementHandle();
+      if (frameHandle) {
+        await frameHandle.scrollIntoViewIfNeeded();
+        await frameHandle.focus();
+        await page.keyboard.press('Space');
+        await page.waitForTimeout(800);
+        await page.keyboard.press('Space'); // play/pause toggle pode precisar de dois toques
+        return true;
+      }
+    } catch { /* continua */ }
   }
 
-  // 3) Qualquer iframe de player (fallback genérico)
+  // 3) Qualquer iframe (fallback genérico) — clique inferior esquerdo
   const anyFrame = page.locator('iframe').first();
   if (await anyFrame.count()) {
-    notice('Tentando iniciar via clique no centro do primeiro iframe.');
+    notice('Tentando iniciar via clique no canto inferior esquerdo do primeiro iframe.');
     try {
       const box = await anyFrame.boundingBox();
       if (box) {
-        const x = box.x + box.width / 2;
-        const y = box.y + box.height / 2;
+        const x = box.x + Math.max(24, box.width * 0.05);
+        const y = box.y + box.height - Math.max(24, box.height * 0.08);
         await page.mouse.move(x, y);
-        await page.mouse.click(x, y);
+        await page.mouse.click(x, y, { delay: 50 });
+        await page.waitForTimeout(800);
+        await page.mouse.click(x, y, { delay: 50 });
         return true;
       }
     } catch { /* ignora */ }
@@ -173,46 +209,31 @@ async function clickPlay(page) {
   return false;
 }
 
-async function logLessonContext(page) {
-  // p[data-cy="timePartLesson"]
-  try {
-    const tempo = await page.locator('p[data-cy="timePartLesson"]').first().innerText({ timeout: 4000 });
-    notice(`Tempo informado na página: ${tempo}`);
-  } catch { /* silencioso */ }
-
-  // div.infoCard (se existir)
-  try {
-    const info = await page.locator('div.infoCard').first().innerText({ timeout: 2000 });
-    if (info && info.trim()) notice(`infoCard: ${info.trim().slice(0, 200)}`);
-  } catch { /* silencioso */ }
-
-  // div[data-cy="partLesson"] (se existir)
-  try {
-    const part = await page.locator('div[data-cy="partLesson"]').first().innerText({ timeout: 2000 });
-    if (part && part.trim()) notice(`partLesson: ${part.trim().slice(0, 200)}`);
-  } catch { /* silencioso */ }
-}
-
 async function playAndWaitForVideo(page) {
-  // Log de contexto da aula
+  // Log de contexto
   await logLessonContext(page);
 
   // Ler tempo da aula
-  let tempoMs = null;
+  let tempoMs;
   try {
-    const tempoTexto = await page.locator('p[data-cy="timePartLesson"]').first().innerText({ timeout: 5000 });
+    const tempoTexto = await page.locator('p[data-cy="timePartLesson"]').first().innerText({ timeout: 6000 });
     tempoMs = parseTimeToMs(tempoTexto.trim());
-    notice(`Tempo da aula detectado: ${tempoTexto} (+1 min) => aguardar ${Math.round(tempoMs / 1000)}s`);
+    notice(`Tempo da aula: ${tempoTexto} (+1 min) => aguardar ~${Math.round(tempoMs / 1000)}s`);
   } catch {
-    warn('Não foi possível ler o tempo da aula. Usando tempo padrão de 5 minutos (+1 min embutido).');
+    warn('Não foi possível ler o tempo da aula. Usando 5min como fallback (+1 min embutido).');
     tempoMs = 5 * 60 * 1000;
   }
 
-  // Garantir que o player começa a tocar
-  await clickPlay(page);
-  await page.waitForTimeout(2000); // pequena margem para iniciar
+  // Garantir que o player inicia
+  const started = await clickPlay(page);
+  if (!started) {
+    warn('Prosseguindo mesmo sem confirmação do play (alguns players auto-start ao focar).');
+  }
 
-  // Esperar o tempo calculado
+  // Margem de inicialização
+  await page.waitForTimeout(2000);
+
+  // Aguardando duração completa +1min
   await page.waitForTimeout(tempoMs);
   return true;
 }
@@ -227,10 +248,8 @@ async function processDisciplina(page, link, idx) {
     passos++;
     groupStart(`Aula/Página ${passos}`);
 
-    // Tenta tocar/aguardar o vídeo pelo tempo indicado
     await playAndWaitForVideo(page);
 
-    // Avançar
     const avancou = await tryClickAvancar(page);
     if (!avancou) {
       notice('Botão "Avançar" não existe mais. Fim da disciplina.');
