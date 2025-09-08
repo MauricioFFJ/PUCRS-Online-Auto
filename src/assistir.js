@@ -141,49 +141,34 @@ async function logLessonContext(page) {
   } catch {}
 }
 
-// Clicar no PLAY dentro do iframe (Vimeo) no canto inferior esquerdo com varredura + fallback Space
 async function clickPlay(page) {
-  // 1) Tenta overlay nativo da página (data-play-button)
+  // 1) Overlay nativo da página (se existir)
   const overlayPlay = page.locator('button[data-play-button="true"]').first();
   if (await overlayPlay.count()) {
     notice('Play overlay encontrado, clicando...');
     try {
       await overlayPlay.click({ timeout: 5000 });
       return true;
-    } catch { /* continua */ }
+    } catch {}
   }
 
-  // 2) Iframe do Vimeo: calcular posição aproximada do botão de play e varrer entorno
+  // 2) Iframe do Vimeo — clique no centro
   const vimeoFrame = page.locator('iframe[src*="player.vimeo.com"]').first();
   if (await vimeoFrame.count()) {
-    notice('Iframe do Vimeo encontrado; tentando clicar na área do botão de play.');
+    notice('Iframe do Vimeo encontrado; clicando no centro para iniciar.');
     try {
       const box = await vimeoFrame.boundingBox();
       if (box) {
-        const baseX = box.x + box.width * 0.08;  // ~8% da largura a partir da esquerda
-        const baseY = box.y + box.height * 0.90; // ~90% da altura a partir do topo
-
-        const attempts = [
-          { dx: 0, dy: 0 },
-          { dx: 12, dy: 0 },
-          { dx: -12, dy: 0 },
-          { dx: 0, dy: -12 },
-          { dx: 0, dy: 12 },
-          { dx: 18, dy: 0 },
-          { dx: -18, dy: 0 },
-          { dx: 0, dy: -18 },
-          { dx: 0, dy: 18 }
-        ];
-
-        for (const { dx, dy } of attempts) {
-          await page.mouse.click(baseX + dx, baseY + dy, { delay: 50 });
-          await page.waitForTimeout(250);
-        }
+        const centerX = box.x + box.width / 2;
+        const centerY = box.y + box.height / 2;
+        await page.mouse.click(centerX, centerY, { delay: 50 });
+        await page.waitForTimeout(500);
+        // Segundo clique como reforço
+        await page.mouse.click(centerX, centerY, { delay: 50 });
         return true;
       }
     } catch {}
-
-    // 2b) Focar o iframe e enviar tecla Espaço como fallback
+    // 2b) Focar e mandar Espaço
     try {
       notice('Tentando iniciar com tecla Espaço focando o iframe.');
       const frameHandle = await vimeoFrame.elementHandle();
@@ -192,25 +177,21 @@ async function clickPlay(page) {
         await frameHandle.focus();
         await page.keyboard.press('Space');
         await page.waitForTimeout(500);
-        // Tenta de novo (alguns players precisam de dois toques)
-        await page.keyboard.press('Space');
-        await page.waitForTimeout(300);
         return true;
       }
     } catch {}
   }
 
-  // 3) Fallback: primeiro iframe qualquer, clique em posição equivalente
+  // 3) Fallback: qualquer iframe
   const anyFrame = page.locator('iframe').first();
   if (await anyFrame.count()) {
-    notice('Tentando iniciar via clique no canto inferior esquerdo do primeiro iframe (fallback).');
+    notice('Tentando iniciar via clique no centro do primeiro iframe (fallback).');
     try {
       const box = await anyFrame.boundingBox();
       if (box) {
-        const baseX = box.x + box.width * 0.08;
-        const baseY = box.y + box.height * 0.90;
-        await page.mouse.click(baseX, baseY, { delay: 50 });
-        await page.waitForTimeout(250);
+        const centerX = box.x + box.width / 2;
+        const centerY = box.y + box.height / 2;
+        await page.mouse.click(centerX, centerY, { delay: 50 });
         return true;
       }
     } catch {}
@@ -219,6 +200,7 @@ async function clickPlay(page) {
   warn('Não foi possível acionar o play.');
   return false;
 }
+
 
 async function playAndWaitForVideo(page) {
   // Log de contexto
