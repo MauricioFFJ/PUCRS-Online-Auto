@@ -23,10 +23,18 @@ async function waitAndClick(page, selector, opts = {}) {
 }
 
 async function tryClickAvancar(page) {
-  const buttonByRole = page.getByRole('button', { name: 'Avançar', exact: false });
-  if (await buttonByRole.count()) { await buttonByRole.first().click(); return true; }
-  const byTextSpan = page.locator('span.MuiButton-label', { hasText: 'Avançar' });
-  if (await byTextSpan.count()) { await byTextSpan.first().click(); return true; }
+  // 1) Buscar por role
+  const byRole = page.getByRole('button', { name: /Avan\w*çar/i });
+  if (await byRole.count()) { await byRole.first().click(); return true; }
+
+  // 2) Botão com span label
+  const bySpan = page.locator('button:has(span.MuiButton-label:has-text("Avançar"))');
+  if (await bySpan.count()) { await bySpan.first().click(); return true; }
+
+  // 3) Qualquer elemento com texto "Avançar"
+  const byText = page.locator('text="Avançar"');
+  if (await byText.count()) { await byText.first().click(); return true; }
+
   return false;
 }
 
@@ -82,44 +90,130 @@ async function openDisciplines(page) {
   return links.slice(0, 2);
 }
 
+// Parse de durações:
+// - "18m", "1h", "1h 05m", "45s"
+// - "mm:ss", "hh:mm:ss"
 function parseTimeToMs(timeStr) {
-  // Aceita formatos mm:ss ou hh:mm:ss
-  const parts = timeStr.split(':').map(p => parseInt(p, 10));
-  let seconds = 0;
-  if (parts.length === 2) {
-    seconds = parts[0] * 60 + parts[1];
-  } else if (parts.length === 3) {
-    seconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+  const s = (timeStr || '').trim().toLowerCase();
+
+  // Formatos "hh:mm:ss" ou "mm:ss"
+  if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(s)) {
+    const parts = s.split(':').map(n => parseInt(n, 10));
+    let seconds = 0;
+    if (parts.length === 2) seconds = parts[0] * 60 + parts[1];
+    else if (parts.length === 3) seconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+    return (seconds + 60) * 1000; // +1 min
   }
-  return (seconds + 60) * 1000; // +1 minuto
+
+  // Formatos "1h 05m", "18m", "45s", "1h"
+  let hours = 0, minutes = 0, seconds = 0;
+  const hMatch = s.match(/(\d+)\s*h/);
+  const mMatch = s.match(/(\d+)\s*m/);
+  const secMatch = s.match(/(\d+)\s*s/);
+  if (hMatch) hours = parseInt(hMatch[1], 10);
+  if (mMatch) minutes = parseInt(mMatch[1], 10);
+  if (secMatch) seconds = parseInt(secMatch[1], 10);
+
+  if (hMatch || mMatch || secMatch) {
+    const total = hours * 3600 + minutes * 60 + seconds;
+    return (total + 60) * 1000; // +1 min
+  }
+
+  // Fallback
+  return 5 * 60 * 1000;
+}
+
+// Tenta clicar no play:
+// 1) Botão overlay na própria página (data-play-button)
+// 2) Clique no centro do iframe do Vimeo (cross-origin) para iniciar playback
+async function clickPlay(page) {
+  // 1) Botão overlay da página (quando disponível)
+  const overlayPlay = page.locator('button[data-play-button="true"]').first();
+  if (await overlayPlay.count()) {
+    notice('Play overlay encontrado, clicando...');
+    try {
+      await overlayPlay.click({ timeout: 5000 });
+      return true;
+    } catch { /* segue para iframe */ }
+  }
+
+  // 2) Iframe do Vimeo: clicar no centro para iniciar
+  const vimeoFrame = page.locator('iframe[src*="player.vimeo.com"]').first();
+  if (await vimeoFrame.count()) {
+    notice('Iframe do Vimeo encontrado; clicando no centro para iniciar.');
+    try {
+      const box = await vimeoFrame.boundingBox();
+      if (box) {
+        const x = box.x + box.width / 2;
+        const y = box.y + box.height / 2;
+        await page.mouse.move(x, y);
+        await page.mouse.click(x, y);
+        return true;
+      }
+    } catch { /* ignora */ }
+  }
+
+  // 3) Qualquer iframe de player (fallback genérico)
+  const anyFrame = page.locator('iframe').first();
+  if (await anyFrame.count()) {
+    notice('Tentando iniciar via clique no centro do primeiro iframe.');
+    try {
+      const box = await anyFrame.boundingBox();
+      if (box) {
+        const x = box.x + box.width / 2;
+        const y = box.y + box.height / 2;
+        await page.mouse.move(x, y);
+        await page.mouse.click(x, y);
+        return true;
+      }
+    } catch { /* ignora */ }
+  }
+
+  warn('Não foi possível acionar o play (overlay/iframe).');
+  return false;
+}
+
+async function logLessonContext(page) {
+  // p[data-cy="timePartLesson"]
+  try {
+    const tempo = await page.locator('p[data-cy="timePartLesson"]').first().innerText({ timeout: 4000 });
+    notice(`Tempo informado na página: ${tempo}`);
+  } catch { /* silencioso */ }
+
+  // div.infoCard (se existir)
+  try {
+    const info = await page.locator('div.infoCard').first().innerText({ timeout: 2000 });
+    if (info && info.trim()) notice(`infoCard: ${info.trim().slice(0, 200)}`);
+  } catch { /* silencioso */ }
+
+  // div[data-cy="partLesson"] (se existir)
+  try {
+    const part = await page.locator('div[data-cy="partLesson"]').first().innerText({ timeout: 2000 });
+    if (part && part.trim()) notice(`partLesson: ${part.trim().slice(0, 200)}`);
+  } catch { /* silencioso */ }
 }
 
 async function playAndWaitForVideo(page) {
+  // Log de contexto da aula
+  await logLessonContext(page);
+
   // Ler tempo da aula
   let tempoMs = null;
   try {
     const tempoTexto = await page.locator('p[data-cy="timePartLesson"]').first().innerText({ timeout: 5000 });
     tempoMs = parseTimeToMs(tempoTexto.trim());
-    notice(`Tempo da aula detectado: ${tempoTexto} (+1 min) = ${tempoMs / 1000}s`);
+    notice(`Tempo da aula detectado: ${tempoTexto} (+1 min) => aguardar ${Math.round(tempoMs / 1000)}s`);
   } catch {
-    warn('Não foi possível ler o tempo da aula. Usando tempo padrão de 5 minutos.');
+    warn('Não foi possível ler o tempo da aula. Usando tempo padrão de 5 minutos (+1 min embutido).');
     tempoMs = 5 * 60 * 1000;
   }
 
-  // Clicar no botão de play se existir
-  const playBtn = page.locator('button[data-play-button="true"]').first();
-  if (await playBtn.count()) {
-    notice('Botão de play encontrado, clicando...');
-    await playBtn.click().catch(() => {});
-    await page.waitForTimeout(2000);
-  } else {
-    warn('Nenhum botão de play encontrado.');
-  }
+  // Garantir que o player começa a tocar
+  await clickPlay(page);
+  await page.waitForTimeout(2000); // pequena margem para iniciar
 
   // Esperar o tempo calculado
-  notice(`Aguardando ${tempoMs / 1000} segundos para simular assistir ao vídeo...`);
   await page.waitForTimeout(tempoMs);
-
   return true;
 }
 
@@ -132,11 +226,20 @@ async function processDisciplina(page, link, idx) {
   while (true) {
     passos++;
     groupStart(`Aula/Página ${passos}`);
+
+    // Tenta tocar/aguardar o vídeo pelo tempo indicado
     await playAndWaitForVideo(page);
+
+    // Avançar
     const avancou = await tryClickAvancar(page);
-    if (!avancou) { notice('Botão "Avançar" não existe mais. Fim da disciplina.'); groupEnd(); break; }
+    if (!avancou) {
+      notice('Botão "Avançar" não existe mais. Fim da disciplina.');
+      groupEnd();
+      break;
+    }
     notice('Avançando para a próxima página/aula.');
     await page.waitForLoadState('domcontentloaded', { timeout: 60000 });
+
     groupEnd();
   }
   groupEnd();
