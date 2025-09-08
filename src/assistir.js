@@ -83,20 +83,55 @@ async function openDisciplines(page) {
 }
 
 async function playAndWaitForVideo(page) {
-  const video = page.locator('video').first();
-  if (!(await video.count())) { warn('Nenhum vídeo encontrado nesta página.'); return false; }
-
-  notice('Vídeo encontrado; aguardando até o término.');
+  // 1. Se houver botão de play, clicar
   const playBtn = page.locator('button[data-play-button="true"]').first();
-  if (await playBtn.count()) await playBtn.click().catch(() => {});
+  if (await playBtn.count()) {
+    notice('Botão de play encontrado, clicando...');
+    await playBtn.click().catch(() => {});
+    await page.waitForTimeout(2000);
+  }
 
-  try { await video.evaluate(async v => { if (v.paused) await v.play().catch(() => {}); }); } catch {}
+  // 2. Procurar vídeo na página
+  let video = page.locator('video').first();
 
+  // 3. Se não achar, procurar dentro de iframes
+  if (!(await video.count())) {
+    const frames = page.frames();
+    for (const frame of frames) {
+      const frameVideo = frame.locator('video').first();
+      if (await frameVideo.count()) {
+        notice('Vídeo encontrado dentro de um iframe.');
+        video = frameVideo;
+        break;
+      }
+    }
+  }
+
+  // 4. Esperar um pouco se ainda não achou
+  if (!(await video.count())) {
+    notice('Aguardando carregamento do vídeo...');
+    await page.waitForTimeout(5000);
+  }
+
+  if (!(await video.count())) {
+    warn('Nenhum vídeo detectado mesmo após esperar e verificar iframes.');
+    return false;
+  }
+
+  // 5. Garantir que está tocando
+  try {
+    await video.evaluate(async v => { if (v.paused) await v.play().catch(() => {}); });
+  } catch {}
+
+  // 6. Aguardar até terminar
   const maxWaitMs = 3 * 60 * 60 * 1000;
   const start = Date.now();
   while (Date.now() - start < maxWaitMs) {
     const { ended, currentTime, duration, paused } = await video.evaluate(v => ({
-      ended: v.ended, currentTime: v.currentTime || 0, duration: v.duration || 0, paused: v.paused
+      ended: v.ended,
+      currentTime: v.currentTime || 0,
+      duration: v.duration || 0,
+      paused: v.paused
     }));
 
     console.log(`Progresso: ${currentTime.toFixed(1)}s / ${isFinite(duration) ? duration.toFixed(1) : '??'}s`);
@@ -104,6 +139,7 @@ async function playAndWaitForVideo(page) {
     if (paused) { try { await video.evaluate(v => v.play()); } catch {} }
     await new Promise(r => setTimeout(r, 5000));
   }
+
   warn('Timeout aguardando vídeo.');
   return false;
 }
@@ -153,7 +189,6 @@ async function processDisciplina(page, link, idx) {
     );
     groupEnd();
 
-    // Segunda disciplina
     const linksNovos = await page.$$eval(
       'a.MuiTypography-root.MuiLink-root.MuiLink-underlineHover.MuiTypography-colorPrimary',
       els => els.slice(0, 2).map(e => e.href)
@@ -170,3 +205,4 @@ async function processDisciplina(page, link, idx) {
     await browser.close();
   }
 })();
+``
