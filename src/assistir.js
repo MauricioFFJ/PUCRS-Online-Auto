@@ -10,21 +10,11 @@ if (!EMAIL || !PASSWORD) {
   process.exit(1);
 }
 
-function groupStart(title) {
-  console.log(`::group::${title}`);
-}
-function groupEnd() {
-  console.log('::endgroup::');
-}
-function notice(msg) {
-  console.log(`::notice title=Info::${msg}`);
-}
-function warn(msg) {
-  console.log(`::warning title=Atenção::${msg}`);
-}
-function fail(msg) {
-  console.log(`::error title=Erro::${msg}`);
-}
+function groupStart(title) { console.log(`::group::${title}`); }
+function groupEnd() { console.log('::endgroup::'); }
+function notice(msg) { console.log(`::notice title=Info::${msg}`); }
+function warn(msg) { console.log(`::warning title=Atenção::${msg}`); }
+function fail(msg) { console.log(`::error title=Erro::${msg}`); }
 
 async function waitAndClick(page, selector, opts = {}) {
   const timeout = opts.timeout ?? 30000;
@@ -34,15 +24,9 @@ async function waitAndClick(page, selector, opts = {}) {
 
 async function tryClickAvancar(page) {
   const buttonByRole = page.getByRole('button', { name: 'Avançar', exact: false });
-  if (await buttonByRole.count()) {
-    await buttonByRole.first().click();
-    return true;
-  }
+  if (await buttonByRole.count()) { await buttonByRole.first().click(); return true; }
   const byTextSpan = page.locator('span.MuiButton-label', { hasText: 'Avançar' });
-  if (await byTextSpan.count()) {
-    await byTextSpan.first().click();
-    return true;
-  }
+  if (await byTextSpan.count()) { await byTextSpan.first().click(); return true; }
   return false;
 }
 
@@ -68,9 +52,7 @@ async function ensureLoggedIn(page) {
   try {
     await page.waitForSelector('#KmsiCheckboxField', { timeout: 15000 });
     await page.click('input[type="submit"]');
-  } catch {
-    warn('Tela "Manter conectado?" não apareceu (ok).');
-  }
+  } catch { warn('Tela "Manter conectado?" não apareceu (ok).'); }
 
   notice('Aguardando home do Campus Digital');
   await page.waitForURL('**/home', { timeout: 60000 });
@@ -83,19 +65,10 @@ async function openDisciplines(page) {
   await waitAndClick(page, 'button[data-cy="buttonSeeDisciplines"]');
 
   notice('Aguardando lista de disciplinas aparecer');
-  try {
-    await page.waitForSelector(
-      'a.MuiTypography-root.MuiLink-root.MuiLink-underlineHover.MuiTypography-colorPrimary',
-      { timeout: 60000 }
-    );
-  } catch {
-    warn('Não encontrou links no tempo esperado, tentando forçar navegação...');
-    await page.goto(DISCIPLINE_LIST_URL, { waitUntil: 'domcontentloaded' });
-    await page.waitForSelector(
-      'a.MuiTypography-root.MuiLink-root.MuiLink-underlineHover.MuiTypography-colorPrimary',
-      { timeout: 60000 }
-    );
-  }
+  await page.waitForSelector(
+    'a.MuiTypography-root.MuiLink-root.MuiLink-underlineHover.MuiTypography-colorPrimary',
+    { timeout: 60000 }
+  );
 
   notice('Coletando os dois primeiros links de disciplinas');
   const links = await page.$$eval(
@@ -103,10 +76,7 @@ async function openDisciplines(page) {
     els => els.slice(0, 2).map(e => e.href)
   );
 
-  if (!links.length) {
-    throw new Error('Nenhuma disciplina encontrada.');
-  }
-
+  if (!links.length) throw new Error('Nenhuma disciplina encontrada.');
   console.log('Links encontrados:', links);
   groupEnd();
   return links.slice(0, 2);
@@ -114,51 +84,26 @@ async function openDisciplines(page) {
 
 async function playAndWaitForVideo(page) {
   const video = page.locator('video').first();
-
-  if (!(await video.count())) {
-    warn('Nenhum vídeo encontrado nesta página.');
-    return false;
-  }
+  if (!(await video.count())) { warn('Nenhum vídeo encontrado nesta página.'); return false; }
 
   notice('Vídeo encontrado; aguardando até o término.');
   const playBtn = page.locator('button[data-play-button="true"]').first();
-  if (await playBtn.count()) {
-    await playBtn.click().catch(() => {});
-  }
+  if (await playBtn.count()) await playBtn.click().catch(() => {});
 
-  try {
-    await video.evaluate(async v => {
-      if (v.paused) await v.play().catch(() => {});
-    });
-  } catch {}
+  try { await video.evaluate(async v => { if (v.paused) await v.play().catch(() => {}); }); } catch {}
 
   const maxWaitMs = 3 * 60 * 60 * 1000;
   const start = Date.now();
-
   while (Date.now() - start < maxWaitMs) {
     const { ended, currentTime, duration, paused } = await video.evaluate(v => ({
-      ended: v.ended,
-      currentTime: v.currentTime || 0,
-      duration: v.duration || 0,
-      paused: v.paused
+      ended: v.ended, currentTime: v.currentTime || 0, duration: v.duration || 0, paused: v.paused
     }));
 
     console.log(`Progresso: ${currentTime.toFixed(1)}s / ${isFinite(duration) ? duration.toFixed(1) : '??'}s`);
-
-    if (ended) {
-      notice('Vídeo finalizado.');
-      return true;
-    }
-
-    if (paused) {
-      try {
-        await video.evaluate(v => v.play());
-      } catch {}
-    }
-
+    if (ended) { notice('Vídeo finalizado.'); return true; }
+    if (paused) { try { await video.evaluate(v => v.play()); } catch {} }
     await new Promise(r => setTimeout(r, 5000));
   }
-
   warn('Timeout aguardando vídeo.');
   return false;
 }
@@ -172,20 +117,13 @@ async function processDisciplina(page, link, idx) {
   while (true) {
     passos++;
     groupStart(`Aula/Página ${passos}`);
-
-    const hadVideo = await playAndWaitForVideo(page);
+    await playAndWaitForVideo(page);
     const avancou = await tryClickAvancar(page);
-    if (!avancou) {
-      notice('Botão "Avançar" não existe mais. Fim da disciplina.');
-      groupEnd();
-      break;
-    }
-
+    if (!avancou) { notice('Botão "Avançar" não existe mais. Fim da disciplina.'); groupEnd(); break; }
     notice('Avançando para a próxima página/aula.');
     await page.waitForLoadState('domcontentloaded', { timeout: 60000 });
     groupEnd();
   }
-
   groupEnd();
 }
 
@@ -195,7 +133,6 @@ async function processDisciplina(page, link, idx) {
     viewport: { width: 1366, height: 768 },
     recordVideo: { dir: 'session-videos', size: { width: 1280, height: 720 } }
   });
-
   const page = await context.newPage();
   await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
 
@@ -203,18 +140,25 @@ async function processDisciplina(page, link, idx) {
     await ensureLoggedIn(page);
     const links = await openDisciplines(page);
 
-    for (let i = 0; i < links.length; i++) {
-      await processDisciplina(page, links[i], i);
-      if (i === 0) {
-        groupStart('Retornando à lista de disciplinas');
-        await page.goto(DISCIPLINE_LIST_URL, { waitUntil: 'domcontentloaded' });
-        await page.waitForSelector(
-          'a.MuiTypography-root.MuiLink-root.MuiLink-underlineHover.MuiTypography-colorPrimary',
-          { timeout: 60000 }
-        );
-        groupEnd();
-      }
-    }
+    // Primeira disciplina
+    await processDisciplina(page, links[0], 0);
+
+    // Voltar para lista e abrir segunda disciplina
+    groupStart('Retornando à lista de disciplinas');
+    await page.goto('https://campusdigital.pucrs.br/home', { waitUntil: 'domcontentloaded' });
+    await waitAndClick(page, 'button[data-cy="buttonSeeDisciplines"]');
+    await page.waitForSelector(
+      'a.MuiTypography-root.MuiLink-root.MuiLink-underlineHover.MuiTypography-colorPrimary',
+      { timeout: 60000 }
+    );
+    groupEnd();
+
+    // Segunda disciplina
+    const linksNovos = await page.$$eval(
+      'a.MuiTypography-root.MuiLink-root.MuiLink-underlineHover.MuiTypography-colorPrimary',
+      els => els.slice(0, 2).map(e => e.href)
+    );
+    await processDisciplina(page, linksNovos[1], 1);
 
     notice('Todas as aulas das duas disciplinas foram processadas com sucesso.');
   } catch (err) {
