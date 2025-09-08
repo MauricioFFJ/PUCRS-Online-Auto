@@ -82,66 +82,45 @@ async function openDisciplines(page) {
   return links.slice(0, 2);
 }
 
+function parseTimeToMs(timeStr) {
+  // Aceita formatos mm:ss ou hh:mm:ss
+  const parts = timeStr.split(':').map(p => parseInt(p, 10));
+  let seconds = 0;
+  if (parts.length === 2) {
+    seconds = parts[0] * 60 + parts[1];
+  } else if (parts.length === 3) {
+    seconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+  }
+  return (seconds + 60) * 1000; // +1 minuto
+}
+
 async function playAndWaitForVideo(page) {
-  // 1. Se houver botão de play, clicar
+  // Ler tempo da aula
+  let tempoMs = null;
+  try {
+    const tempoTexto = await page.locator('p[data-cy="timePartLesson"]').first().innerText({ timeout: 5000 });
+    tempoMs = parseTimeToMs(tempoTexto.trim());
+    notice(`Tempo da aula detectado: ${tempoTexto} (+1 min) = ${tempoMs / 1000}s`);
+  } catch {
+    warn('Não foi possível ler o tempo da aula. Usando tempo padrão de 5 minutos.');
+    tempoMs = 5 * 60 * 1000;
+  }
+
+  // Clicar no botão de play se existir
   const playBtn = page.locator('button[data-play-button="true"]').first();
   if (await playBtn.count()) {
     notice('Botão de play encontrado, clicando...');
     await playBtn.click().catch(() => {});
     await page.waitForTimeout(2000);
+  } else {
+    warn('Nenhum botão de play encontrado.');
   }
 
-  // 2. Procurar vídeo na página
-  let video = page.locator('video').first();
+  // Esperar o tempo calculado
+  notice(`Aguardando ${tempoMs / 1000} segundos para simular assistir ao vídeo...`);
+  await page.waitForTimeout(tempoMs);
 
-  // 3. Se não achar, procurar dentro de iframes
-  if (!(await video.count())) {
-    const frames = page.frames();
-    for (const frame of frames) {
-      const frameVideo = frame.locator('video').first();
-      if (await frameVideo.count()) {
-        notice('Vídeo encontrado dentro de um iframe.');
-        video = frameVideo;
-        break;
-      }
-    }
-  }
-
-  // 4. Esperar um pouco se ainda não achou
-  if (!(await video.count())) {
-    notice('Aguardando carregamento do vídeo...');
-    await page.waitForTimeout(5000);
-  }
-
-  if (!(await video.count())) {
-    warn('Nenhum vídeo detectado mesmo após esperar e verificar iframes.');
-    return false;
-  }
-
-  // 5. Garantir que está tocando
-  try {
-    await video.evaluate(async v => { if (v.paused) await v.play().catch(() => {}); });
-  } catch {}
-
-  // 6. Aguardar até terminar
-  const maxWaitMs = 3 * 60 * 60 * 1000;
-  const start = Date.now();
-  while (Date.now() - start < maxWaitMs) {
-    const { ended, currentTime, duration, paused } = await video.evaluate(v => ({
-      ended: v.ended,
-      currentTime: v.currentTime || 0,
-      duration: v.duration || 0,
-      paused: v.paused
-    }));
-
-    console.log(`Progresso: ${currentTime.toFixed(1)}s / ${isFinite(duration) ? duration.toFixed(1) : '??'}s`);
-    if (ended) { notice('Vídeo finalizado.'); return true; }
-    if (paused) { try { await video.evaluate(v => v.play()); } catch {} }
-    await new Promise(r => setTimeout(r, 5000));
-  }
-
-  warn('Timeout aguardando vídeo.');
-  return false;
+  return true;
 }
 
 async function processDisciplina(page, link, idx) {
@@ -205,4 +184,3 @@ async function processDisciplina(page, link, idx) {
     await browser.close();
   }
 })();
-``
