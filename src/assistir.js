@@ -126,22 +126,22 @@ async function logLessonContext(page) {
   try {
     const tempo = await page.locator('p[data-cy="timePartLesson"]').first().innerText({ timeout: 4000 });
     notice(`Tempo informado na página: ${tempo}`);
-  } catch { /* silencioso */ }
+  } catch {}
 
   // infoCard
   try {
     const info = await page.locator('div.infoCard').first().innerText({ timeout: 2000 });
     if (info && info.trim()) notice(`infoCard: ${info.trim().slice(0, 300)}`);
-  } catch { /* silencioso */ }
+  } catch {}
 
   // partLesson
   try {
     const part = await page.locator('div[data-cy="partLesson"]').first().innerText({ timeout: 2000 });
     if (part && part.trim()) notice(`partLesson: ${part.trim().slice(0, 300)}`);
-  } catch { /* silencioso */ }
+  } catch {}
 }
 
-// Clicar no PLAY dentro do iframe (Vimeo) no canto inferior esquerdo
+// Clicar no PLAY dentro do iframe (Vimeo) no canto inferior esquerdo com varredura + fallback Space
 async function clickPlay(page) {
   // 1) Tenta overlay nativo da página (data-play-button)
   const overlayPlay = page.locator('button[data-play-button="true"]').first();
@@ -153,26 +153,37 @@ async function clickPlay(page) {
     } catch { /* continua */ }
   }
 
-  // 2) Iframe do Vimeo
+  // 2) Iframe do Vimeo: calcular posição aproximada do botão de play e varrer entorno
   const vimeoFrame = page.locator('iframe[src*="player.vimeo.com"]').first();
   if (await vimeoFrame.count()) {
-    notice('Iframe do Vimeo encontrado; clicando no canto inferior esquerdo.');
+    notice('Iframe do Vimeo encontrado; tentando clicar na área do botão de play.');
     try {
       const box = await vimeoFrame.boundingBox();
       if (box) {
-        // Offset um pouco afastado das bordas para evitar áreas "mortas"
-        const x = box.x + Math.max(24, box.width * 0.05);
-        const y = box.y + box.height - Math.max(24, box.height * 0.08);
-        await page.mouse.move(x, y);
-        await page.mouse.click(x, y, { delay: 50 });
-        // Alguns players exigem um segundo clique se há overlay
-        await page.waitForTimeout(800);
-        await page.mouse.click(x, y, { delay: 50 });
+        const baseX = box.x + box.width * 0.08;  // ~8% da largura a partir da esquerda
+        const baseY = box.y + box.height * 0.90; // ~90% da altura a partir do topo
+
+        const attempts = [
+          { dx: 0, dy: 0 },
+          { dx: 12, dy: 0 },
+          { dx: -12, dy: 0 },
+          { dx: 0, dy: -12 },
+          { dx: 0, dy: 12 },
+          { dx: 18, dy: 0 },
+          { dx: -18, dy: 0 },
+          { dx: 0, dy: -18 },
+          { dx: 0, dy: 18 }
+        ];
+
+        for (const { dx, dy } of attempts) {
+          await page.mouse.click(baseX + dx, baseY + dy, { delay: 50 });
+          await page.waitForTimeout(250);
+        }
         return true;
       }
-    } catch { /* continua */ }
+    } catch {}
 
-    // 2b) Focar o iframe e enviar "Espaço" como fallback
+    // 2b) Focar o iframe e enviar tecla Espaço como fallback
     try {
       notice('Tentando iniciar com tecla Espaço focando o iframe.');
       const frameHandle = await vimeoFrame.elementHandle();
@@ -180,32 +191,32 @@ async function clickPlay(page) {
         await frameHandle.scrollIntoViewIfNeeded();
         await frameHandle.focus();
         await page.keyboard.press('Space');
-        await page.waitForTimeout(800);
-        await page.keyboard.press('Space'); // play/pause toggle pode precisar de dois toques
+        await page.waitForTimeout(500);
+        // Tenta de novo (alguns players precisam de dois toques)
+        await page.keyboard.press('Space');
+        await page.waitForTimeout(300);
         return true;
       }
-    } catch { /* continua */ }
+    } catch {}
   }
 
-  // 3) Qualquer iframe (fallback genérico) — clique inferior esquerdo
+  // 3) Fallback: primeiro iframe qualquer, clique em posição equivalente
   const anyFrame = page.locator('iframe').first();
   if (await anyFrame.count()) {
-    notice('Tentando iniciar via clique no canto inferior esquerdo do primeiro iframe.');
+    notice('Tentando iniciar via clique no canto inferior esquerdo do primeiro iframe (fallback).');
     try {
       const box = await anyFrame.boundingBox();
       if (box) {
-        const x = box.x + Math.max(24, box.width * 0.05);
-        const y = box.y + box.height - Math.max(24, box.height * 0.08);
-        await page.mouse.move(x, y);
-        await page.mouse.click(x, y, { delay: 50 });
-        await page.waitForTimeout(800);
-        await page.mouse.click(x, y, { delay: 50 });
+        const baseX = box.x + box.width * 0.08;
+        const baseY = box.y + box.height * 0.90;
+        await page.mouse.click(baseX, baseY, { delay: 50 });
+        await page.waitForTimeout(250);
         return true;
       }
-    } catch { /* ignora */ }
+    } catch {}
   }
 
-  warn('Não foi possível acionar o play (overlay/iframe).');
+  warn('Não foi possível acionar o play.');
   return false;
 }
 
@@ -213,7 +224,7 @@ async function playAndWaitForVideo(page) {
   // Log de contexto
   await logLessonContext(page);
 
-  // Ler tempo da aula
+  // Ler tempo da aula (+1 min)
   let tempoMs;
   try {
     const tempoTexto = await page.locator('p[data-cy="timePartLesson"]').first().innerText({ timeout: 6000 });
@@ -224,16 +235,16 @@ async function playAndWaitForVideo(page) {
     tempoMs = 5 * 60 * 1000;
   }
 
-  // Garantir que o player inicia
+  // Iniciar o player
   const started = await clickPlay(page);
   if (!started) {
-    warn('Prosseguindo mesmo sem confirmação do play (alguns players auto-start ao focar).');
+    warn('Prosseguindo mesmo sem confirmação do play (o player pode auto-iniciar após interação).');
   }
 
   // Margem de inicialização
-  await page.waitForTimeout(2000);
+  await page.waitForTimeout(1500);
 
-  // Aguardando duração completa +1min
+  // Aguardar a duração completa +1 min
   await page.waitForTimeout(tempoMs);
   return true;
 }
@@ -294,6 +305,7 @@ async function processDisciplina(page, link, idx) {
       'a.MuiTypography-root.MuiLink-root.MuiLink-underlineHover.MuiTypography-colorPrimary',
       els => els.slice(0, 2).map(e => e.href)
     );
+
     await processDisciplina(page, linksNovos[1], 1);
 
     notice('Todas as aulas das duas disciplinas foram processadas com sucesso.');
