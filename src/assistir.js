@@ -33,7 +33,6 @@ async function waitAndClick(page, selector, opts = {}) {
 }
 
 async function tryClickAvancar(page) {
-  // Tenta encontrar por acessibilidade (mais robusto), senão fallback por texto
   const buttonByRole = page.getByRole('button', { name: 'Avançar', exact: false });
   if (await buttonByRole.count()) {
     await buttonByRole.first().click();
@@ -65,16 +64,14 @@ async function ensureLoggedIn(page) {
   await page.fill('input[name="passwd"]', PASSWORD);
   await page.click('input[type="submit"]');
 
-  // KMSI ("Manter conectado?")
   notice('Tratando "Manter conectado?" se aparecer');
   try {
     await page.waitForSelector('#KmsiCheckboxField', { timeout: 15000 });
     await page.click('input[type="submit"]');
-  } catch (_) {
+  } catch {
     warn('Tela "Manter conectado?" não apareceu (ok).');
   }
 
-  // Página home
   notice('Aguardando home do Campus Digital');
   await page.waitForURL('**/home', { timeout: 60000 });
   groupEnd();
@@ -85,23 +82,29 @@ async function openDisciplines(page) {
   notice('Clicando em "Ver Disciplinas"');
   await waitAndClick(page, 'button[data-cy="buttonSeeDisciplines"]');
 
-  notice('Aguardando lista de disciplinas carregar');
-  await page.waitForLoadState('networkidle', { timeout: 60000 });
-
-  // Se veio redirecionado para outra URL, navega explicitamente para a lista desejada (fallback)
-  if (!page.url().includes('/courses/') || !page.url().includes('disciplines')) {
-    warn('Redirecionamento diferente do esperado; navegando para URL de disciplinas definida.');
+  notice('Aguardando lista de disciplinas aparecer');
+  try {
+    await page.waitForSelector(
+      'a.MuiTypography-root.MuiLink-root.MuiLink-underlineHover.MuiTypography-colorPrimary',
+      { timeout: 60000 }
+    );
+  } catch {
+    warn('Não encontrou links no tempo esperado, tentando forçar navegação...');
     await page.goto(DISCIPLINE_LIST_URL, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector(
+      'a.MuiTypography-root.MuiLink-root.MuiLink-underlineHover.MuiTypography-colorPrimary',
+      { timeout: 60000 }
+    );
   }
 
   notice('Coletando os dois primeiros links de disciplinas');
   const links = await page.$$eval(
     'a.MuiTypography-root.MuiLink-root.MuiLink-underlineHover.MuiTypography-colorPrimary',
-    (els) => els.slice(0, 2).map((e) => e.href)
+    els => els.slice(0, 2).map(e => e.href)
   );
 
   if (!links.length) {
-    throw new Error('Nenhuma disciplina encontrada na lista.');
+    throw new Error('Nenhuma disciplina encontrada.');
   }
 
   console.log('Links encontrados:', links);
@@ -110,63 +113,53 @@ async function openDisciplines(page) {
 }
 
 async function playAndWaitForVideo(page) {
-  // Procura elemento <video> e tenta dar play se estiver pausado
   const video = page.locator('video').first();
 
   if (!(await video.count())) {
-    warn('Nenhum elemento <video> encontrado nesta página.');
+    warn('Nenhum vídeo encontrado nesta página.');
     return false;
   }
 
-  notice('Vídeo encontrado; garantindo que está em reprodução até o término.');
-  // Se houver botão de play dedicado, clique
+  notice('Vídeo encontrado; aguardando até o término.');
   const playBtn = page.locator('button[data-play-button="true"]').first();
   if (await playBtn.count()) {
     await playBtn.click().catch(() => {});
   }
 
-  // Força play via JS caso necessário
   try {
-    await video.evaluate(async (v) => {
-      // Tenta iniciar
-      if (v.paused) {
-        await v.play().catch(() => {});
-      }
+    await video.evaluate(async v => {
+      if (v.paused) await v.play().catch(() => {});
     });
-  } catch (_) {
-    // ignora
-  }
+  } catch {}
 
-  // Aguarda até 'ended === true', com timeout amplo
-  const maxWaitMs = 3 * 60 * 60 * 1000; // 3 horas máx por aula (ajuste se quiser)
+  const maxWaitMs = 3 * 60 * 60 * 1000;
   const start = Date.now();
 
   while (Date.now() - start < maxWaitMs) {
-    const { ended, currentTime, duration, paused } = await video.evaluate((v) => ({
+    const { ended, currentTime, duration, paused } = await video.evaluate(v => ({
       ended: v.ended,
       currentTime: v.currentTime || 0,
       duration: v.duration || 0,
       paused: v.paused
     }));
 
-    console.log(`Progresso do vídeo: ${currentTime.toFixed(1)}s / ${isFinite(duration) ? duration.toFixed(1) : '??'}s`);
+    console.log(`Progresso: ${currentTime.toFixed(1)}s / ${isFinite(duration) ? duration.toFixed(1) : '??'}s`);
 
     if (ended) {
-      notice('Vídeo terminou.');
+      notice('Vídeo finalizado.');
       return true;
     }
 
-    // Se pausado no meio, tenta retomar
     if (paused) {
       try {
-        await video.evaluate((v) => v.play());
-      } catch (_) {}
+        await video.evaluate(v => v.play());
+      } catch {}
     }
 
-    await new Promise((r) => setTimeout(r, 5000));
+    await new Promise(r => setTimeout(r, 5000));
   }
 
-  warn('Timeout ao aguardar o término do vídeo.');
+  warn('Timeout aguardando vídeo.');
   return false;
 }
 
@@ -174,29 +167,22 @@ async function processDisciplina(page, link, idx) {
   groupStart(`Disciplina ${idx + 1}`);
   notice(`Abrindo disciplina: ${link}`);
   await page.goto(link, { waitUntil: 'domcontentloaded' });
-  await page.waitForLoadState('networkidle', { timeout: 60000 });
 
   let passos = 0;
   while (true) {
     passos++;
     groupStart(`Aula/Página ${passos}`);
 
-    // Tenta assistir vídeo se existir
     const hadVideo = await playAndWaitForVideo(page);
-
-    // Tenta avançar
-    const avançou = await tryClickAvancar(page);
-    if (!avançou) {
+    const avancou = await tryClickAvancar(page);
+    if (!avancou) {
       notice('Botão "Avançar" não existe mais. Fim da disciplina.');
       groupEnd();
       break;
     }
 
     notice('Avançando para a próxima página/aula.');
-    // Aguarda carregamento da próxima página
     await page.waitForLoadState('domcontentloaded', { timeout: 60000 });
-    await page.waitForLoadState('networkidle', { timeout: 60000 });
-
     groupEnd();
   }
 
@@ -204,18 +190,13 @@ async function processDisciplina(page, link, idx) {
 }
 
 (async () => {
-  const browser = await chromium.launch({
-    headless: true // no CI grava vídeo/trace; local pode mudar para false se quiser ver
-  });
-
+  const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
     viewport: { width: 1366, height: 768 },
     recordVideo: { dir: 'session-videos', size: { width: 1280, height: 720 } }
   });
 
   const page = await context.newPage();
-
-  // Trace para auditoria
   await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
 
   try {
@@ -224,11 +205,13 @@ async function processDisciplina(page, link, idx) {
 
     for (let i = 0; i < links.length; i++) {
       await processDisciplina(page, links[i], i);
-      // Após concluir a primeira, volta para lista, coleta novamente (caso URL mude)
       if (i === 0) {
-        groupStart('Retornar à lista de disciplinas');
+        groupStart('Retornando à lista de disciplinas');
         await page.goto(DISCIPLINE_LIST_URL, { waitUntil: 'domcontentloaded' });
-        await page.waitForLoadState('networkidle', { timeout: 60000 });
+        await page.waitForSelector(
+          'a.MuiTypography-root.MuiLink-root.MuiLink-underlineHover.MuiTypography-colorPrimary',
+          { timeout: 60000 }
+        );
         groupEnd();
       }
     }
@@ -238,7 +221,6 @@ async function processDisciplina(page, link, idx) {
     fail(`Falha na automação: ${err.message}`);
     process.exitCode = 1;
   } finally {
-    // Salva trace
     await context.tracing.stop({ path: 'playwright-trace.zip' });
     await context.close();
     await browser.close();
