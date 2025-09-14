@@ -108,11 +108,42 @@ with sync_playwright() as p:
     page.goto("https://campusdigital.pucrs.br/login")
     notice('Clicando em "Entrar"')
     page.click('button:has-text("Entrar")')
-    notice("Aguardando campo de e-mail")
-    page.fill('input[type="email"]', EMAIL)
+
+    notice("Aguardando redirecionamento para página de login")
+    page.wait_for_load_state("networkidle", timeout=60000)
+
+    try:
+        page.wait_for_selector('input[type="email"]', timeout=20000)
+        page.fill('input[type="email"]', EMAIL)
+    except:
+        frames = page.frames
+        for f in frames:
+            if f.url and "login" in f.url.lower():
+                try:
+                    f.wait_for_selector('input[type="email"]', timeout=20000)
+                    f.fill('input[type="email"]', EMAIL)
+                    break
+                except:
+                    pass
+        else:
+            fail("Campo de e-mail não encontrado nem na página nem em iframes.")
+            page.screenshot(path="erro_login.png")
+            context.close()
+            browser.close()
+            exit(1)
+
     page.click('input[type="submit"]')
     notice("Aguardando campo de senha")
-    page.fill('input[name="passwd"]', PASSWORD)
+    try:
+        page.wait_for_selector('input[name="passwd"]', timeout=20000)
+        page.fill('input[name="passwd"]', PASSWORD)
+    except:
+        fail("Campo de senha não encontrado.")
+        page.screenshot(path="erro_senha.png")
+        context.close()
+        browser.close()
+        exit(1)
+
     page.click('input[type="submit"]')
     notice('Tratando "Manter conectado?" se aparecer')
     try:
@@ -120,6 +151,7 @@ with sync_playwright() as p:
         page.click('input[type="submit"]')
     except:
         warn('Tela "Manter conectado?" não apareceu (ok).')
+
     page.wait_for_url("**/home")
     group_end()
 
@@ -149,6 +181,6 @@ with sync_playwright() as p:
 
     assistir_disciplina(page, links2[1])
 
-    context.close()  # salva vídeos
+    context.close()
     browser.close()
     group_end()
