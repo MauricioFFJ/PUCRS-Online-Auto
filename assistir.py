@@ -12,7 +12,6 @@ if not EMAIL or not PASSWORD:
 
 def parse_time_to_seconds(time_str):
     s = time_str.strip().lower()
-    # Formato mm:ss ou hh:mm:ss
     if re.match(r"^\d{1,2}:\d{2}(:\d{2})?$", s):
         parts = list(map(int, s.split(":")))
         if len(parts) == 2:
@@ -20,7 +19,6 @@ def parse_time_to_seconds(time_str):
         else:
             seconds = parts[0] * 3600 + parts[1] * 60 + parts[2]
         return seconds + 60
-    # Formato 18m, 1h 05m, etc.
     h = re.search(r"(\d+)\s*h", s)
     m = re.search(r"(\d+)\s*m", s)
     sec = re.search(r"(\d+)\s*s", s)
@@ -29,10 +27,9 @@ def parse_time_to_seconds(time_str):
     seconds = int(sec.group(1)) if sec else 0
     if h or m or sec:
         return hours * 3600 + minutes * 60 + seconds + 60
-    return 5 * 60  # fallback
+    return 5 * 60
 
 def click_play(page):
-    # Tenta overlay
     overlay = page.locator('button[data-play-button="true"]').first
     if overlay.count():
         try:
@@ -40,7 +37,6 @@ def click_play(page):
             return True
         except:
             pass
-    # Tenta iframe do Vimeo
     vimeo = page.locator('iframe[src*="player.vimeo.com"]').first
     if vimeo.count():
         vimeo.wait_for(state="visible", timeout=10000)
@@ -72,7 +68,6 @@ def assistir_disciplina(page, link):
 
         time.sleep(tempo_seg)
 
-        # Avançar
         avancar = page.get_by_role("button", name=re.compile("Avançar", re.I))
         if avancar.count():
             avancar.first.click()
@@ -82,11 +77,10 @@ def assistir_disciplina(page, link):
             break
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(headless=False)
+    browser = p.chromium.launch(headless=True)  # mude para False se quiser ver localmente
     context = browser.new_context(viewport={"width": 1366, "height": 768})
     page = context.new_page()
 
-    # Login
     print("Login...")
     page.goto("https://campusdigital.pucrs.br/login")
     page.click('button:has-text("Entrar")')
@@ -101,7 +95,6 @@ with sync_playwright() as p:
         pass
     page.wait_for_url("**/home")
 
-    # Disciplinas
     page.click('button[data-cy="buttonSeeDisciplines"]')
     page.wait_for_selector('a.MuiTypography-root.MuiLink-root')
     links = page.eval_on_selector_all(
@@ -110,10 +103,8 @@ with sync_playwright() as p:
     )
     print("Links encontrados:", links)
 
-    # Primeira disciplina
     assistir_disciplina(page, links[0])
 
-    # Segunda disciplina
     page.goto("https://campusdigital.pucrs.br/home")
     page.click('button[data-cy="buttonSeeDisciplines"]')
     page.wait_for_selector('a.MuiTypography-root.MuiLink-root')
