@@ -1,7 +1,9 @@
-name: Assistir Aulas PUCRS (Debug)
+name: Assistir Aulas PUCRS
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:   # permite rodar manualmente
+  schedule:
+    - cron: "0 12 * * *"  # executa todo dia às 12h UTC (ajuste se quiser)
 
 jobs:
   assistir:
@@ -21,8 +23,16 @@ jobs:
           pip install playwright
           playwright install chromium
 
-      - name: Rodar automação (modo debug)
+      - name: Rodar automação
         env:
           EMAIL: ${{ secrets.EMAIL }}
           PASSWORD: ${{ secrets.PASSWORD }}
         run: python -u assistir.py
+
+      - name: Upload de screenshots (se existirem)
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: |
+            screenshot_aula_*.png
+          if-no-files-found: ignore
