@@ -3,7 +3,7 @@ name: Assistir Aulas PUCRS
 on:
   workflow_dispatch:   # permite rodar manualmente
   schedule:
-    - cron: "0 12 * * *"  # executa todo dia às 12h UTC (ajuste se quiser)
+    - cron: "0 12 * * *"  # executa todo dia às 12h UTC
 
 jobs:
   assistir:
@@ -33,6 +33,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: screenshots
-          path: |
-            screenshot_aula_*.png
+          path: screenshot_aula_*.png
+          if-no-files-found: ignore
+
+      - name: Upload de vídeos da sessão (se existirem)
+        uses: actions/upload-artifact@v4
+        with:
+          name: videos
+          path: session-videos/
           if-no-files-found: ignore
