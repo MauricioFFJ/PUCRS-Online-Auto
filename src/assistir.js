@@ -179,6 +179,13 @@ async function processDisciplina(page, link, idx) {
       groupEnd();
       break;
     }
+    notice('Avançando para a próxima página/aula.');
+    await page.waitForLoadState('domcontentloaded', { timeout: 60000 });
+    groupEnd();
+  }
+  groupEnd();
+}
+
 (async () => {
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
