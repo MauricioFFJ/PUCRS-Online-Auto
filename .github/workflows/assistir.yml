@@ -1,0 +1,30 @@
+name: Assistir Aulas PUCRS
+
+on:
+  workflow_dispatch:   # permite rodar manualmente
+  schedule:
+    - cron: "0 12 * * *"  # executa todo dia às 12h UTC (ajuste se quiser)
+
+jobs:
+  assistir:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar Playwright Python
+        run: |
+          pip install playwright
+          playwright install chromium
+
+      - name: Rodar automação
+        env:
+          EMAIL: ${{ secrets.EMAIL }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+        run: python assistir.py
