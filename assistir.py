@@ -4,28 +4,16 @@ import re
 import time
 import sys
 
-# Força flush imediato dos prints
 sys.stdout.reconfigure(line_buffering=True)
 
-# Funções de log no padrão GitHub Actions
-def group_start(title):
-    print(f"::group::{title}")
-
-def group_end():
-    print("::endgroup::")
-
-def notice(msg):
-    print(f"::notice title=Info::{msg}")
-
-def warn(msg):
-    print(f"::warning title=Atenção::{msg}")
-
-def fail(msg):
-    print(f"::error title=Erro::{msg}")
+def group_start(title): print(f"::group::{title}")
+def group_end(): print("::endgroup::")
+def notice(msg): print(f"::notice title=Info::{msg}")
+def warn(msg): print(f"::warning title=Atenção::{msg}")
+def fail(msg): print(f"::error title=Erro::{msg}")
 
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
-
 if not EMAIL or not PASSWORD:
     fail("Defina EMAIL e PASSWORD como variáveis de ambiente.")
     exit(1)
@@ -34,11 +22,8 @@ def parse_time_to_seconds(time_str):
     s = time_str.strip().lower()
     if re.match(r"^\d{1,2}:\d{2}(:\d{2})?$", s):
         parts = list(map(int, s.split(":")))
-        if len(parts) == 2:
-            seconds = parts[0] * 60 + parts[1]
-        else:
-            seconds = parts[0] * 3600 + parts[1] * 60 + parts[2]
-        return min(seconds + 60, 30)  # limite de 30s para debug
+        seconds = parts[0]*60 + parts[1] if len(parts)==2 else parts[0]*3600 + parts[1]*60 + parts[2]
+        return seconds + 60
     h = re.search(r"(\d+)\s*h", s)
     m = re.search(r"(\d+)\s*m", s)
     sec = re.search(r"(\d+)\s*s", s)
@@ -46,28 +31,31 @@ def parse_time_to_seconds(time_str):
     minutes = int(m.group(1)) if m else 0
     seconds = int(sec.group(1)) if sec else 0
     if h or m or sec:
-        return min(hours * 3600 + minutes * 60 + seconds + 60, 30)
-    return 5  # fallback rápido
+        return hours*3600 + minutes*60 + seconds + 60
+    return 5*60
 
-def click_play(page):
-    overlay = page.locator('button[data-play-button="true"]').first
-    if overlay.count():
-        try:
-            notice("Play overlay encontrado, clicando...")
-            overlay.click(timeout=3000)
-            return True
-        except:
-            pass
+def click_play(page, passo):
     vimeo = page.locator('iframe[src*="player.vimeo.com"]').first
-    if vimeo.count():
-        notice("Iframe do Vimeo encontrado; clicando no centro para iniciar.")
+    if not vimeo.count():
+        warn("Nenhum vídeo encontrado nesta página.")
+        return False
+    try:
+        notice("Iframe do Vimeo encontrado; tentando iniciar vídeo.")
         vimeo.wait_for(state="visible", timeout=10000)
         box = vimeo.bounding_box()
         if box:
-            page.mouse.click(box["x"] + box["width"]/2, box["y"] + box["height"]/2)
+            page.mouse.click(box["x"]+box["width"]/2, box["y"]+box["height"]/2)
             time.sleep(0.5)
-            page.mouse.click(box["x"] + box["width"]/2, box["y"] + box["height"]/2)
+            page.mouse.click(box["x"]+box["width"]/2, box["y"]+box["height"]/2)
             return True
+        frame = vimeo.content_frame()
+        if frame:
+            notice("Tentando iniciar com tecla espaço no iframe.")
+            frame.press("body", " ")
+            return True
+    except Exception as e:
+        warn(f"Erro ao tentar clicar no vídeo: {e}")
+        page.screenshot(path=f"screenshot_aula_{passo}.png")
     warn("Não foi possível acionar o play.")
     return False
 
@@ -81,18 +69,18 @@ def assistir_disciplina(page, link):
         try:
             tempo_txt = page.locator('p[data-cy="timePartLesson"]').first.inner_text(timeout=5000)
             tempo_seg = parse_time_to_seconds(tempo_txt)
-            notice(f"Tempo da aula: {tempo_txt} (+1 min) => aguardando {tempo_seg}s (modo debug)")
+            notice(f"Tempo da aula: {tempo_txt} (+1 min) => aguardando {tempo_seg}s")
         except:
-            tempo_seg = 5
-            warn("Tempo não encontrado, usando 5s como fallback.")
+            tempo_seg = 5*60
+            warn("Tempo não encontrado, usando 5min como fallback.")
 
-        started = click_play(page)
+        started = click_play(page, passo)
         if not started:
             warn("Prosseguindo mesmo sem confirmação do play.")
 
-        notice("Iniciando espera simulada...")
+        notice("Iniciando espera para assistir aula...")
         time.sleep(tempo_seg)
-        notice("Espera concluída.")
+        notice("Tempo de aula concluído.")
 
         avancar = page.get_by_role("button", name=re.compile("Avançar", re.I))
         if avancar.count():
