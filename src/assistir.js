@@ -2,8 +2,6 @@ const { chromium } = require('playwright');
 
 const EMAIL = process.env.EMAIL;
 const PASSWORD = process.env.PASSWORD;
-const DISCIPLINE_LIST_URL =
-  process.env.DISCIPLINE_LIST_URL || 'https://campusdigital.pucrs.br/courses/10?actions=disciplines/';
 
 if (!EMAIL || !PASSWORD) {
   console.error('::error title=Credenciais ausentes::Defina EMAIL e PASSWORD como secrets/variáveis.');
@@ -23,18 +21,12 @@ async function waitAndClick(page, selector, opts = {}) {
 }
 
 async function tryClickAvancar(page) {
-  // 1) Role
   const byRole = page.getByRole('button', { name: /Avan\w*çar/i });
   if (await byRole.count()) { await byRole.first().click(); return true; }
-
-  // 2) Botão com label
   const bySpan = page.locator('button:has(span.MuiButton-label:has-text("Avançar"))');
   if (await bySpan.count()) { await bySpan.first().click(); return true; }
-
-  // 3) Texto solto
   const byText = page.locator('text=Avançar');
   if (await byText.count()) { await byText.first().click(); return true; }
-
   return false;
 }
 
@@ -42,26 +34,21 @@ async function ensureLoggedIn(page) {
   groupStart('Login');
   notice('Abrindo página de login do Campus Digital');
   await page.goto('https://campusdigital.pucrs.br/login', { waitUntil: 'domcontentloaded' });
-
   notice('Clicando em "Entrar"');
   await waitAndClick(page, 'button:has-text("Entrar")');
-
   notice('Aguardando campo de e-mail');
   await page.waitForSelector('input[type="email"]', { timeout: 45000 });
   await page.fill('input[type="email"]', EMAIL);
   await page.click('input[type="submit"]');
-
   notice('Aguardando campo de senha');
   await page.waitForSelector('input[name="passwd"]', { timeout: 45000 });
   await page.fill('input[name="passwd"]', PASSWORD);
   await page.click('input[type="submit"]');
-
   notice('Tratando "Manter conectado?" se aparecer');
   try {
     await page.waitForSelector('#KmsiCheckboxField', { timeout: 15000 });
     await page.click('input[type="submit"]');
   } catch { warn('Tela "Manter conectado?" não apareceu (ok).'); }
-
   notice('Aguardando home do Campus Digital');
   await page.waitForURL('**/home', { timeout: 60000 });
   groupEnd();
@@ -71,39 +58,31 @@ async function openDisciplines(page) {
   groupStart('Navegar para disciplinas');
   notice('Clicando em "Ver Disciplinas"');
   await waitAndClick(page, 'button[data-cy="buttonSeeDisciplines"]');
-
   notice('Aguardando lista de disciplinas aparecer');
   await page.waitForSelector(
     'a.MuiTypography-root.MuiLink-root.MuiLink-underlineHover.MuiTypography-colorPrimary',
     { timeout: 60000 }
   );
-
   notice('Coletando os dois primeiros links de disciplinas');
   const links = await page.$$eval(
     'a.MuiTypography-root.MuiLink-root.MuiLink-underlineHover.MuiTypography-colorPrimary',
     els => els.slice(0, 2).map(e => e.href)
   );
-
   if (!links.length) throw new Error('Nenhuma disciplina encontrada.');
   console.log('Links encontrados:', links);
   groupEnd();
   return links.slice(0, 2);
 }
 
-// Aceita "18m", "1h", "1h 05m", "45s", "mm:ss", "hh:mm:ss"
 function parseTimeToMs(timeStr) {
   const s = (timeStr || '').trim().toLowerCase();
-
-  // hh:mm:ss ou mm:ss
   if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(s)) {
     const parts = s.split(':').map(n => parseInt(n, 10));
     let seconds = 0;
     if (parts.length === 2) seconds = parts[0] * 60 + parts[1];
     else seconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
-    return (seconds + 60) * 1000; // +1 min
+    return (seconds + 60) * 1000;
   }
-
-  // 1h 05m / 18m / 45s / 1h
   let hours = 0, minutes = 0, seconds = 0;
   const hMatch = s.match(/(\d+)\s*h/);
   const mMatch = s.match(/(\d+)\s*m/);
@@ -111,38 +90,29 @@ function parseTimeToMs(timeStr) {
   if (hMatch) hours = parseInt(hMatch[1], 10);
   if (mMatch) minutes = parseInt(mMatch[1], 10);
   if (secMatch) seconds = parseInt(secMatch[1], 10);
-
   if (hMatch || mMatch || secMatch) {
     const total = hours * 3600 + minutes * 60 + seconds;
-    return (total + 60) * 1000; // +1 min
+    return (total + 60) * 1000;
   }
-
-  // Fallback
   return 5 * 60 * 1000;
 }
 
 async function logLessonContext(page) {
-  // Tempo
   try {
     const tempo = await page.locator('p[data-cy="timePartLesson"]').first().innerText({ timeout: 4000 });
     notice(`Tempo informado na página: ${tempo}`);
   } catch {}
-
-  // infoCard
   try {
     const info = await page.locator('div.infoCard').first().innerText({ timeout: 2000 });
-    if (info && info.trim()) notice(`infoCard: ${info.trim().slice(0, 300)}`);
+    if (info && info.trim()) notice(`infoCard: ${info.trim()}`);
   } catch {}
-
-  // partLesson
   try {
     const part = await page.locator('div[data-cy="partLesson"]').first().innerText({ timeout: 2000 });
-    if (part && part.trim()) notice(`partLesson: ${part.trim().slice(0, 300)}`);
+    if (part && part.trim()) notice(`partLesson: ${part.trim()}`);
   } catch {}
 }
 
 async function clickPlay(page) {
-  // 1) Overlay nativo da página
   const overlayPlay = page.locator('button[data-play-button="true"]').first();
   if (await overlayPlay.count()) {
     notice('Play overlay encontrado, clicando...');
@@ -151,20 +121,17 @@ async function clickPlay(page) {
       return true;
     } catch {}
   }
-
-  // 2) Iframe do Vimeo — clique direto no elemento
   const vimeoFrame = page.locator('iframe[src*="player.vimeo.com"]').first();
   if (await vimeoFrame.count()) {
     notice('Iframe do Vimeo encontrado; clicando no centro para iniciar.');
     try {
+      await vimeoFrame.waitFor({ state: 'visible', timeout: 10000 });
       await vimeoFrame.scrollIntoViewIfNeeded();
-      await vimeoFrame.click({ position: { x: 50, y: 50 } }); // porcentagem relativa
+      await vimeoFrame.click({ position: { x: 50, y: 50 } });
       await page.waitForTimeout(500);
-      // Segundo clique como reforço
       await vimeoFrame.click({ position: { x: 50, y: 50 } });
       return true;
     } catch {}
-    // Fallback: tecla Espaço
     try {
       notice('Tentando iniciar com tecla Espaço focando o iframe.');
       const frameHandle = await vimeoFrame.elementHandle();
@@ -176,47 +143,24 @@ async function clickPlay(page) {
       }
     } catch {}
   }
-
-  // 3) Fallback: qualquer iframe
-  const anyFrame = page.locator('iframe').first();
-  if (await anyFrame.count()) {
-    notice('Tentando iniciar via clique no centro do primeiro iframe (fallback).');
-    try {
-      await anyFrame.scrollIntoViewIfNeeded();
-      await anyFrame.click({ position: { x: 50, y: 50 } });
-      return true;
-    } catch {}
-  }
-
   warn('Não foi possível acionar o play.');
   return false;
 }
 
 async function playAndWaitForVideo(page) {
-  // Log de contexto
   await logLessonContext(page);
-
-  // Ler tempo da aula (+1 min)
   let tempoMs;
   try {
     const tempoTexto = await page.locator('p[data-cy="timePartLesson"]').first().innerText({ timeout: 6000 });
     tempoMs = parseTimeToMs(tempoTexto.trim());
     notice(`Tempo da aula: ${tempoTexto} (+1 min) => aguardar ~${Math.round(tempoMs / 1000)}s`);
   } catch {
-    warn('Não foi possível ler o tempo da aula. Usando 5min como fallback (+1 min embutido).');
+    warn('Não foi possível ler o tempo da aula. Usando 5min como fallback.');
     tempoMs = 5 * 60 * 1000;
   }
-
-  // Iniciar o player
   const started = await clickPlay(page);
-  if (!started) {
-    warn('Prosseguindo mesmo sem confirmação do play (o player pode auto-iniciar após interação).');
-  }
-
-  // Margem de inicialização
+  if (!started) warn('Prosseguindo mesmo sem confirmação do play.');
   await page.waitForTimeout(1500);
-
-  // Aguardar a duração completa +1 min
   await page.waitForTimeout(tempoMs);
   return true;
 }
@@ -225,13 +169,12 @@ async function processDisciplina(page, link, idx) {
   groupStart(`Disciplina ${idx + 1}`);
   notice(`Abrindo disciplina: ${link}`);
   await page.goto(link, { waitUntil: 'domcontentloaded' });
-
   let passos = 0;
   while (true) {
     passos++;
     groupStart(`Aula/Página ${passos}`);
-
-    await playAndWaitForVideo(page);
+    await playAndWait
+        await playAndWaitForVideo(page);
 
     const avancou = await tryClickAvancar(page);
     if (!avancou) {
