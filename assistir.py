@@ -96,8 +96,11 @@ def assistir_disciplina(page, link):
 
 with sync_playwright() as p:
     group_start("Iniciando script")
-    browser = p.chromium.launch(headless=False, slow_mo=500)
-    context = browser.new_context(viewport={"width": 1366, "height": 768})
+    browser = p.chromium.launch(headless=True)
+    context = browser.new_context(
+        viewport={"width": 1366, "height": 768},
+        record_video_dir="session-videos"
+    )
     page = context.new_page()
 
     group_start("Login")
@@ -146,5 +149,6 @@ with sync_playwright() as p:
 
     assistir_disciplina(page, links2[1])
 
+    context.close()  # salva vídeos
     browser.close()
     group_end()
