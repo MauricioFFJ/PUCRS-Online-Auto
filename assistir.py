@@ -2,6 +2,10 @@ from playwright.sync_api import sync_playwright
 import os
 import re
 import time
+import sys
+
+# Força flush imediato dos prints
+sys.stdout.reconfigure(line_buffering=True)
 
 # Funções de log no padrão GitHub Actions
 def group_start(title):
@@ -34,7 +38,7 @@ def parse_time_to_seconds(time_str):
             seconds = parts[0] * 60 + parts[1]
         else:
             seconds = parts[0] * 3600 + parts[1] * 60 + parts[2]
-        return seconds + 60
+        return min(seconds + 60, 30)  # limite de 30s para debug
     h = re.search(r"(\d+)\s*h", s)
     m = re.search(r"(\d+)\s*m", s)
     sec = re.search(r"(\d+)\s*s", s)
@@ -42,8 +46,8 @@ def parse_time_to_seconds(time_str):
     minutes = int(m.group(1)) if m else 0
     seconds = int(sec.group(1)) if sec else 0
     if h or m or sec:
-        return hours * 3600 + minutes * 60 + seconds + 60
-    return 5 * 60
+        return min(hours * 3600 + minutes * 60 + seconds + 60, 30)
+    return 5  # fallback rápido
 
 def click_play(page):
     overlay = page.locator('button[data-play-button="true"]').first
@@ -77,16 +81,18 @@ def assistir_disciplina(page, link):
         try:
             tempo_txt = page.locator('p[data-cy="timePartLesson"]').first.inner_text(timeout=5000)
             tempo_seg = parse_time_to_seconds(tempo_txt)
-            notice(f"Tempo da aula: {tempo_txt} (+1 min) => aguardando {tempo_seg}s")
+            notice(f"Tempo da aula: {tempo_txt} (+1 min) => aguardando {tempo_seg}s (modo debug)")
         except:
-            tempo_seg = 5 * 60
-            warn("Tempo não encontrado, usando 5min como fallback.")
+            tempo_seg = 5
+            warn("Tempo não encontrado, usando 5s como fallback.")
 
         started = click_play(page)
         if not started:
             warn("Prosseguindo mesmo sem confirmação do play.")
 
+        notice("Iniciando espera simulada...")
         time.sleep(tempo_seg)
+        notice("Espera concluída.")
 
         avancar = page.get_by_role("button", name=re.compile("Avançar", re.I))
         if avancar.count():
