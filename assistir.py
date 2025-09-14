@@ -96,7 +96,7 @@ def assistir_disciplina(page, link):
 
 with sync_playwright() as p:
     group_start("Iniciando script")
-    browser = p.chromium.launch(headless=True)
+    browser = p.chromium.launch(headless=False, slow_mo=500)
     context = browser.new_context(viewport={"width": 1366, "height": 768})
     page = context.new_page()
 
