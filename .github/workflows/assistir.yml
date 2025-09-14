@@ -1,9 +1,9 @@
 name: Assistir Aulas PUCRS
 
 on:
-  workflow_dispatch:   # permite rodar manualmente
+  workflow_dispatch:
   schedule:
-    - cron: "0 12 * * *"  # executa todo dia às 12h UTC (ajuste se quiser)
+    - cron: "0 12 * * *"  # executa todo dia às 12h UTC
 
 jobs:
   assistir:
