@@ -179,4 +179,44 @@ async function processDisciplina(page, link, idx) {
       groupEnd();
       break;
     }
-   
+(async () => {
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({
+    viewport: { width: 1366, height: 768 },
+    recordVideo: { dir: 'session-videos', size: { width: 1280, height: 720 } }
+  });
+  const page = await context.newPage();
+  await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+
+  try {
+    await ensureLoggedIn(page);
+    const links = await openDisciplines(page);
+
+    await processDisciplina(page, links[0], 0);
+
+    groupStart('Retornando à lista de disciplinas');
+    await page.goto('https://campusdigital.pucrs.br/home', { waitUntil: 'domcontentloaded' });
+    await waitAndClick(page, 'button[data-cy="buttonSeeDisciplines"]');
+    await page.waitForSelector(
+      'a.MuiTypography-root.MuiLink-root.MuiLink-underlineHover.MuiTypography-colorPrimary',
+      { timeout: 60000 }
+    );
+    groupEnd();
+
+    const linksNovos = await page.$$eval(
+      'a.MuiTypography-root.MuiLink-root.MuiLink-underlineHover.MuiTypography-colorPrimary',
+      els => els.slice(0, 2).map(e => e.href)
+    );
+
+    await processDisciplina(page, linksNovos[1], 1);
+
+    notice('Todas as aulas das duas disciplinas foram processadas com sucesso.');
+  } catch (err) {
+    fail(`Falha na automação: ${err.message}`);
+    process.exitCode = 1;
+  } finally {
+    await context.tracing.stop({ path: 'playwright-trace.zip' });
+    await context.close();
+    await browser.close();
+  }
+})();
