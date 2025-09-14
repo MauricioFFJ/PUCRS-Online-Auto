@@ -1,9 +1,7 @@
-name: Assistir Aulas PUCRS
+name: Assistir Aulas PUCRS (Debug)
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 12 * * *"  # executa todo dia às 12h UTC
 
 jobs:
   assistir:
@@ -23,8 +21,8 @@ jobs:
           pip install playwright
           playwright install chromium
 
-      - name: Rodar automação
+      - name: Rodar automação (modo debug)
         env:
           EMAIL: ${{ secrets.EMAIL }}
           PASSWORD: ${{ secrets.PASSWORD }}
-        run: python assistir.py
+        run: python -u assistir.py
